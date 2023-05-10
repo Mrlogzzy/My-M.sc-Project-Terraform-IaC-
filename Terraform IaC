@@ -1,0 +1,195 @@
+provider "aws" {
+  #To use or create any resource in AWS, you need a permssion
+  #This is why access and screet is generated
+  #To define your jurisdiction or area of work
+  access_key = "AKIA3JXU7HTCTEXRZGGJ"
+  secret_key = "+s+BP8X3PpUP8n9jZ/lR/0DTOxrJ4h+pnhYvuvpp"
+  region     = "us-east-1"
+}
+
+resource "aws_instance" "dev-java-instance" {
+  #As we know this is an open source code, 
+  #But we need to generated necessary resources from AWS before it can work
+  #This code online is just an instruction and a guide
+  #The code online cannot build an infrastructure
+  #Amazon Machine Image (AMI) define the kind of machine you want to create
+  #This include, operating system, capacity, and ram
+  ami           = "ami-339900112= Thiswillbemyid".id
+  instance_type = "m5.large"
+
+  tags = {
+    Name = "dev-java-instance"
+  }
+}
+
+resource "aws_vpc" "vpchome" {
+  #Resource name must not change
+  #This is how Terraform will understand what to create
+  #And where to create 
+  cidr_block       = "10.0.0.0/22"
+  instance_tenancy = "default"
+  assign_generated_ipv6_cidr_block = true
+
+  tags = {
+    Name = "vpchome"
+  }
+}
+
+resource "aws_subnet" "public-subnet-1" {
+  #This Subnet is dependent on my VPC and i indicated the VPC ID 
+  #I also indictated iP range to cover
+  vpc_id     = aws_vpc.vpchome.id
+  cidr_block = "10.0.0.0/24"
+
+  tags = {
+    Name = "public-subnet-1"
+  }
+}
+
+resource "aws_subnet" "public-subnet-2" {
+  #Second public subnet
+  vpc_id     = aws_vpc.vpchome.id
+  cidr_block = "10.0.1.0/24"
+
+  tags = {
+    Name = "public-subnet-2"
+  }
+}
+
+resource "aws_subnet" "private-subnet-1" {
+  #This my first private subnet
+  vpc_id     = aws_vpc.vpchome.id
+  cidr_block = "10.0.2.0/24"
+
+  tags = {
+    Name = "vpchome"
+  }
+}
+
+resource "aws_subnet" "private-subnet-2" {
+  #Second private subnet
+  vpc_id     = aws_vpc.vpchome.id
+  cidr_block = "10.0.3.0/24"
+
+  tags = {
+    Name = "private-subnet-2"
+  }
+}
+
+resource "aws_internet_gateway" "pubic-gateway" {
+  #This is my public gateway which allow access from outside VPC
+  vpc_id = aws_vpc.vpchome.id
+
+  tags = {
+    Name = "public-gateway"
+  }
+}
+
+resource "aws_egress_only_internet_gateway" "public-gateway-ipv6" {
+  #This IPv6 communtication is also enabled 
+  vpc_id = aws_vpc.vpchome.id
+
+  tags = {
+    Name = "public-gateway-ipv6"
+  }
+}
+
+resource "aws_eip" "ip1" {
+  #This is a reserved public IP assigned to this Instance
+  vpc      = true
+}
+
+resource "aws_nat_gateway" "nat-gateway-1" {
+  #As said, we need a Static IPv4 
+  #For our private subnet
+  #This enable Instance to connect to service outside VPC
+  #But no external services can initiate a connection 
+  #To this VPC
+  allocation_id = aws_eip.ip1.id
+  subnet_id     = aws_subnet.private-subnet-1.id
+
+  tags = {
+    Name = "nat-gateway"
+  }
+  depends_on = [aws_internet_gateway.public-gateway]
+}
+
+resource "aws_eip" "ip2" {
+  vpc      = true
+}
+
+resource "aws_nat_gateway" "nat-gateway-2" {
+  #Second Nat gateway for our private Subnet
+  allocation_id = aws_eip.ip2.id
+  subnet_id     = aws_subnet.private-subnet-2.id
+
+  tags = {
+    Name = "nat-gateway-2"
+  }
+  depends_on = [aws_internet_gateway.public-gateway]
+}
+
+resource "aws_route_table" "public-routetable" {
+  #To balance gateway loads, i design a routetable
+  #This help to find a destination device and best path to reach it
+  vpc_id = aws_vpc.vpchome.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.public-gateway.id
+  }
+
+  route {
+    ipv6_cidr_block        = "::/0"
+    egress_only_gateway_id = aws_egress_only_internet_gateway.public-gateway-ipv6.id
+  }
+
+  tags = {
+    Name = "public-routetable"
+  }
+}
+
+resource "aws_route_table_association" "public-subnet-1-association" {
+  #For better and smooth connection
+  #We need to establish associate between route table and subnets
+  #This will define if a connection is local route
+  subnet_id      = aws_subnet.public-subnet-1.id
+  route_table_id = aws_route_table.public-routetable.id
+}
+
+resource "aws_route_table_association" "public-subnet-2-association" {
+  subnet_id      = aws_subnet.public-subnet-2.id
+  route_table_id = aws_route_table.public-routetable.id
+}
+
+resource "aws_route_table" "private-routetable" {
+  #Route table routes traffic locally within the VPC
+  #Between the public subnet and private subnet and to the EC2
+  #Routetable also define for my private subnet
+  #And the cidr block range is also define
+  vpc_id = aws_vpc.vpchome.id
+
+  route {
+    cidr_block = "10.10.10.10/32"
+    gateway_id = aws_nat_gateway.nat-gateway1.id
+  }
+
+  route {
+    cidr_block = "10.10.10.10/32"
+    gateway_id = aws_nat_gateway.nat-gateway2.id
+  }
+
+  tags = {
+    Name = "private-routetable"
+  }
+}
+
+resource "aws_route_table_association" "private-subnet-1-association" {
+  subnet_id      = aws_subnet.private-subnet-1.id
+  route_table_id = aws_route_table.private-routetable.id
+}
+
+resource "aws_route_table_association" "private-subnet-2-association" {
+  subnet_id      = aws_subnet.private-subnet-2.id
+  route_table_id = aws_route_table.private-routetable.id
+}
